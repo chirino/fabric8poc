@@ -17,13 +17,8 @@ package io.fabric8.core.zookeeper;
 
 import io.fabric8.spi.Configurer;
 import io.fabric8.spi.scr.AbstractComponent;
-import org.apache.felix.scr.annotations.Activate;
-import org.apache.felix.scr.annotations.Component;
-import org.apache.felix.scr.annotations.ConfigurationPolicy;
-import org.apache.felix.scr.annotations.Deactivate;
-import org.apache.felix.scr.annotations.Modified;
-import org.apache.felix.scr.annotations.Property;
-import org.apache.felix.scr.annotations.Reference;
+import org.apache.curator.framework.api.ACLProvider;
+import org.apache.felix.scr.annotations.*;
 import org.apache.zookeeper.server.NIOServerCnxnFactory;
 import org.apache.zookeeper.server.ServerConfig;
 import org.apache.zookeeper.server.ServerStats;
@@ -41,9 +36,11 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.Callable;
 
 
 @Component(label = "Fabric8 ZooKeeper Server", configurationPid = ZookeeperConstants.ZOOKEEPER_SERVER_PID, policy = ConfigurationPolicy.REQUIRE, immediate = true, metatype = true)
+@Service({io.fabric8.core.zookeeper.ZooKeeperServer.class })
 @org.apache.felix.scr.annotations.Properties({
         @Property(name = "clientPort", intValue = FabricZooKeeperServer.DEFAULT_CLIENT_PORT, label = "Client Port", description = "The port to listen for client connections"),
         @Property(name = "tickTime", intValue = ZooKeeperServer.DEFAULT_TICK_TIME, label = "Tick Time", description = "The basic time unit in milliseconds used by ZooKeeper. It is used to do heartbeats and the minimum session timeout will be twice the tickTime"),
@@ -57,7 +54,7 @@ import java.util.Properties;
         @Property(name = "minSessionTimeout", intValue = FabricZooKeeperServer.DEFAULT_MINIMUM_SESSION_TIMEOUT, label = "Minimum Session Timeout", description = "The minimum session timeout in milliseconds that the server will allow the client to negotiate"),
         @Property(name = "maxSessionTimeout", intValue = FabricZooKeeperServer.DEFAULT_MAXIMUM_SESSION_TIMEOUT, label = "Maximum Session Timeout", description = "Limits the number of concurrent connections (at the socket level) that a single client, identified by IP address, may make to a single member of the ZooKeeper ensemble"), })
 
-public class FabricZooKeeperServer extends AbstractComponent {
+public class FabricZooKeeperServer extends AbstractComponent implements io.fabric8.core.zookeeper.ZooKeeperServer {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(FabricZooKeeperServer.class);
 
@@ -79,6 +76,7 @@ public class FabricZooKeeperServer extends AbstractComponent {
     private File dataDir;
     private File dataLogDir;
 
+    private Callable<Destroyable> builder;
     private Destroyable destroyable;
 
     @Activate
@@ -99,107 +97,123 @@ public class FabricZooKeeperServer extends AbstractComponent {
         deactivateInternal();
     }
 
-    private Destroyable activateInternal(Map<String, ?> configuration) throws Exception {
-        LOGGER.info("Creating zookeeper server with: {}", configuration);
+    public void pause() throws Exception {
+        deactivateInternal();
+    }
 
-        Properties props = new Properties();
-        for (Map.Entry<String, ?> entry : configuration.entrySet()) {
-            props.put(entry.getKey(), entry.getValue());
+    public void resume() throws Exception {
+        if (destroyable == null && builder!=null ) {
+            destroyable = builder.call();
         }
+    }
 
-        //Check required directories exist or create them.
-        if (!dataDir.exists() && !dataDir.mkdirs()) {
-            throw new IOException("Failed to create ZooKeeper dataDir at: " + dataDir.getAbsolutePath());
-        }
+    private Destroyable activateInternal(final Map<String, ?> configuration) throws Exception {
+        builder = new Callable<Destroyable>() {
+            @Override
+            public Destroyable call() throws Exception {
+                LOGGER.info("Creating zookeeper server with: {}", configuration);
 
-        if (!dataLogDir.exists() && !dataLogDir.mkdirs()) {
-            throw new IOException("Failed to create ZooKeeper dataLogDir at: " + dataLogDir.getAbsolutePath());
-        }
-
-        // Create myid file
-        String serverId = (String) props.get(SERVER_ID);
-        if (serverId != null) {
-            props.remove(SERVER_ID);
-            File myId = new File(dataDir, MY_ID);
-            if (myId.exists() && !myId.delete()) {
-                throw new IOException("Failed to delete " + myId);
-            }
-            if (myId.getParentFile() == null || (!myId.getParentFile().exists() && !myId.getParentFile().mkdirs())) {
-                throw new IOException("Failed to create " + myId.getParent());
-            }
-            FileOutputStream fos = new FileOutputStream(myId);
-            try {
-                fos.write((serverId + "\n").getBytes());
-            } finally {
-                fos.close();
-            }
-        }
-
-        QuorumPeerConfig peerConfig = getPeerConfig(props);
-
-        if (!peerConfig.getServers().isEmpty()) {
-            NIOServerCnxnFactory cnxnFactory = new NIOServerCnxnFactory();
-            cnxnFactory.configure(peerConfig.getClientPortAddress(), peerConfig.getMaxClientCnxns());
-
-            QuorumPeer quorumPeer = new QuorumPeer();
-            quorumPeer.setClientPortAddress(peerConfig.getClientPortAddress());
-            quorumPeer.setTxnFactory(new FileTxnSnapLog(new File(peerConfig.getDataLogDir()), new File(peerConfig.getDataDir())));
-            quorumPeer.setQuorumPeers(peerConfig.getServers());
-            quorumPeer.setElectionType(peerConfig.getElectionAlg());
-            quorumPeer.setMyid(peerConfig.getServerId());
-            quorumPeer.setTickTime(peerConfig.getTickTime());
-            quorumPeer.setMinSessionTimeout(peerConfig.getMinSessionTimeout());
-            quorumPeer.setMaxSessionTimeout(peerConfig.getMaxSessionTimeout());
-            quorumPeer.setInitLimit(peerConfig.getInitLimit());
-            quorumPeer.setSyncLimit(peerConfig.getSyncLimit());
-            quorumPeer.setQuorumVerifier(peerConfig.getQuorumVerifier());
-            quorumPeer.setCnxnFactory(cnxnFactory);
-            quorumPeer.setZKDatabase(new ZKDatabase(quorumPeer.getTxnFactory()));
-            quorumPeer.setLearnerType(peerConfig.getPeerType());
-
-            try {
-                LOGGER.debug("Starting quorum peer \"%s\" on address %s", quorumPeer.getMyid(), peerConfig.getClientPortAddress());
-                quorumPeer.start();
-                LOGGER.debug("Started quorum peer \"%s\"", quorumPeer.getMyid());
-            } catch (Exception e) {
-                LOGGER.warn(String.format("Failed to start quorum peer \"%s\", reason : %s ", quorumPeer.getMyid(), e.getMessage()));
-                quorumPeer.shutdown();
-                throw e;
-            }
-
-            // Register stats provider
-            ClusteredServer server = new ClusteredServer(quorumPeer);
-            return server;
-        } else {
-            ServerConfig serverConfig = getServerConfig(peerConfig);
-
-            ZooKeeperServer zkServer = new ZooKeeperServer();
-            FileTxnSnapLog ftxn = new FileTxnSnapLog(new File(serverConfig.getDataLogDir()), new File(serverConfig.getDataDir()));
-            zkServer.setTxnLogFactory(ftxn);
-            zkServer.setTickTime(serverConfig.getTickTime());
-            zkServer.setMinSessionTimeout(serverConfig.getMinSessionTimeout());
-            zkServer.setMaxSessionTimeout(serverConfig.getMaxSessionTimeout());
-            NIOServerCnxnFactory cnxnFactory = new NIOServerCnxnFactory() {
-                protected void configureSaslLogin() throws IOException {
+                Properties props = new Properties();
+                for (Map.Entry<String, ?> entry : configuration.entrySet()) {
+                    props.put(entry.getKey(), entry.getValue());
                 }
-            };
-            cnxnFactory.configure(serverConfig.getClientPortAddress(), serverConfig.getMaxClientCnxns());
 
-            try {
-                LOGGER.debug("Starting ZooKeeper server on address %s", peerConfig.getClientPortAddress());
-                cnxnFactory.startup(zkServer);
-                LOGGER.debug("Started ZooKeeper server");
-            } catch (Exception e) {
-                LOGGER.warn(String.format("Failed to start ZooKeeper server, reason : %s", e));
-                cnxnFactory.shutdown();
-                throw e;
+                //Check required directories exist or create them.
+                if (!dataDir.exists() && !dataDir.mkdirs()) {
+                    throw new IOException("Failed to create ZooKeeper dataDir at: " + dataDir.getAbsolutePath());
+                }
+
+                if (!dataLogDir.exists() && !dataLogDir.mkdirs()) {
+                    throw new IOException("Failed to create ZooKeeper dataLogDir at: " + dataLogDir.getAbsolutePath());
+                }
+
+                // Create myid file
+                String serverId = (String) props.get(SERVER_ID);
+                if (serverId != null) {
+                    props.remove(SERVER_ID);
+                    File myId = new File(dataDir, MY_ID);
+                    if (myId.exists() && !myId.delete()) {
+                        throw new IOException("Failed to delete " + myId);
+                    }
+                    if (myId.getParentFile() == null || (!myId.getParentFile().exists() && !myId.getParentFile().mkdirs())) {
+                        throw new IOException("Failed to create " + myId.getParent());
+                    }
+                    FileOutputStream fos = new FileOutputStream(myId);
+                    try {
+                        fos.write((serverId + "\n").getBytes());
+                    } finally {
+                        fos.close();
+                    }
+                }
+
+                QuorumPeerConfig peerConfig = getPeerConfig(props);
+
+                if (!peerConfig.getServers().isEmpty()) {
+                    NIOServerCnxnFactory cnxnFactory = new NIOServerCnxnFactory();
+                    cnxnFactory.configure(peerConfig.getClientPortAddress(), peerConfig.getMaxClientCnxns());
+
+                    QuorumPeer quorumPeer = new QuorumPeer();
+                    quorumPeer.setClientPortAddress(peerConfig.getClientPortAddress());
+                    quorumPeer.setTxnFactory(new FileTxnSnapLog(new File(peerConfig.getDataLogDir()), new File(peerConfig.getDataDir())));
+                    quorumPeer.setQuorumPeers(peerConfig.getServers());
+                    quorumPeer.setElectionType(peerConfig.getElectionAlg());
+                    quorumPeer.setMyid(peerConfig.getServerId());
+                    quorumPeer.setTickTime(peerConfig.getTickTime());
+                    quorumPeer.setMinSessionTimeout(peerConfig.getMinSessionTimeout());
+                    quorumPeer.setMaxSessionTimeout(peerConfig.getMaxSessionTimeout());
+                    quorumPeer.setInitLimit(peerConfig.getInitLimit());
+                    quorumPeer.setSyncLimit(peerConfig.getSyncLimit());
+                    quorumPeer.setQuorumVerifier(peerConfig.getQuorumVerifier());
+                    quorumPeer.setCnxnFactory(cnxnFactory);
+                    quorumPeer.setZKDatabase(new ZKDatabase(quorumPeer.getTxnFactory()));
+                    quorumPeer.setLearnerType(peerConfig.getPeerType());
+
+                    try {
+                        LOGGER.debug("Starting quorum peer \"%s\" on address %s", quorumPeer.getMyid(), peerConfig.getClientPortAddress());
+                        quorumPeer.start();
+                        LOGGER.debug("Started quorum peer \"%s\"", quorumPeer.getMyid());
+                    } catch (Exception e) {
+                        LOGGER.warn(String.format("Failed to start quorum peer \"%s\", reason : %s ", quorumPeer.getMyid(), e.getMessage()));
+                        quorumPeer.shutdown();
+                        throw e;
+                    }
+
+                    // Register stats provider
+                    ClusteredServer server = new ClusteredServer(quorumPeer);
+                    return server;
+                } else {
+                    ServerConfig serverConfig = getServerConfig(peerConfig);
+
+                    ZooKeeperServer zkServer = new ZooKeeperServer();
+                    FileTxnSnapLog ftxn = new FileTxnSnapLog(new File(serverConfig.getDataLogDir()), new File(serverConfig.getDataDir()));
+                    zkServer.setTxnLogFactory(ftxn);
+                    zkServer.setTickTime(serverConfig.getTickTime());
+                    zkServer.setMinSessionTimeout(serverConfig.getMinSessionTimeout());
+                    zkServer.setMaxSessionTimeout(serverConfig.getMaxSessionTimeout());
+                    NIOServerCnxnFactory cnxnFactory = new NIOServerCnxnFactory() {
+                        protected void configureSaslLogin() throws IOException {
+                        }
+                    };
+                    cnxnFactory.configure(serverConfig.getClientPortAddress(), serverConfig.getMaxClientCnxns());
+
+                    try {
+                        LOGGER.debug("Starting ZooKeeper server on address %s", peerConfig.getClientPortAddress());
+                        cnxnFactory.startup(zkServer);
+                        LOGGER.debug("Started ZooKeeper server");
+                    } catch (Exception e) {
+                        LOGGER.warn(String.format("Failed to start ZooKeeper server, reason : %s", e));
+                        cnxnFactory.shutdown();
+                        throw e;
+                    }
+
+                    // Register stats provider
+                    SimpleServer server = new SimpleServer(zkServer, cnxnFactory);
+
+                    return server;
+                }
             }
-
-            // Register stats provider
-            SimpleServer server = new SimpleServer(zkServer, cnxnFactory);
-
-            return server;
-        }
+        };
+        return builder.call();
     }
 
     private void deactivateInternal() throws Exception {
