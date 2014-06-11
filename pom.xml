@@ -65,6 +65,7 @@
         <version.apache.tomcat>7.0.42</version.apache.tomcat>
         <version.apache.zookeeper>3.4.6</version.apache.zookeeper>
         <version.guava>14.0.1</version.guava>
+        <version.jackson2>2.3.3</version.jackson2>
         <version.javax.servlet30.api>3.0.1</version.javax.servlet30.api>
         <version.jboss.arquillian.core>1.1.2.Final-wildfly-1</version.jboss.arquillian.core>
         <version.jboss.arquillian.osgi>2.1.0.CR15</version.jboss.arquillian.osgi>

@@ -63,6 +63,23 @@
             <artifactId>zookeeper</artifactId>
         </dependency>
         
+        <!-- for JSON support -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-core</artifactId>
+            <version>${version.jackson2}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${version.jackson2}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-annotations</artifactId>
+            <version>${version.jackson2}</version>
+        </dependency>
+
         <!-- Provided Dependencies -->
         <dependency>
             <groupId>org.apache.felix</groupId>
@@ -121,6 +138,10 @@
                             org.apache.zookeeper*,
                             *
                         </Import-Package>
+                        <Private-Package>
+                          io.fabric8.core.*,
+                          com.fasterxml.jackson.*
+                        </Private-Package>
                     </instructions>
                 </configuration>
             </plugin>
