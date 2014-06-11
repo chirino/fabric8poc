@@ -25,6 +25,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.concurrent.TimeUnit;
 
+import io.fabric8.test.smoke.TestSupport;
 import org.jboss.gravia.runtime.Runtime;
 import org.jboss.gravia.runtime.RuntimeLocator;
 import org.jboss.gravia.runtime.ServiceLocator;
@@ -60,7 +61,12 @@ public abstract class EmbeddedTestSupport {
         }
 
         // Wait for the {@link BootstrapComplete} service
-        ServiceLocator.awaitService(BootstrapComplete.class, 20, TimeUnit.SECONDS);
+        try {
+            ServiceLocator.awaitService(BootstrapComplete.class, 20, TimeUnit.SECONDS);
+        } catch (RuntimeException e) {
+            TestSupport.printInactiveScrServices();
+            throw e;
+        }
     }
 
     public static void afterClass() throws Exception {
@@ -68,4 +74,5 @@ public abstract class EmbeddedTestSupport {
         Assert.assertTrue(runtime.shutdown().awaitShutdown(20, TimeUnit.SECONDS));
         RuntimeLocator.releaseRuntime();
     }
+
 }
