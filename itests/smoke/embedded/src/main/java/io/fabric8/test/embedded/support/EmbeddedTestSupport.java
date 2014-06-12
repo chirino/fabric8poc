@@ -40,7 +40,8 @@ public abstract class EmbeddedTestSupport {
 
     private static String[] moduleNames = new String[] { "gravia-provision", "gravia-resolver", "gravia-repository",
             "fabric8-api", "fabric8-spi", "fabric8-core", "fabric8-git", "fabric8-domain-agent",
-            "fabric8-container-karaf-managed", "fabric8-container-tomcat-managed", "fabric8-container-wildfly-managed" };
+            "fabric8-container-karaf-managed", "fabric8-container-tomcat-managed", "fabric8-container-wildfly-managed",
+            "fabric8-itests-smoke-embedded"};
 
     public static void beforeClass() throws Exception {
 

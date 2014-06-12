@@ -34,6 +34,7 @@
     </parent>
 
     <artifactId>fabric8-itests-smoke-embedded</artifactId>
+    <packaging>bundle</packaging>
 
     <name>Fabric8 :: Testsuite :: Smoke :: Embedded</name>
 
@@ -88,6 +89,63 @@
 
     <build>
         <plugins>
+          
+          <plugin>
+                <groupId>org.apache.felix</groupId>
+                <artifactId>maven-scr-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <phase>process-test-resources</phase>
+                        <goals>
+                            <goal>scr</goal>
+                        </goals>
+                        <configuration>
+                            <specVersion>1.2</specVersion>
+                            <strictMode>true</strictMode>
+                        </configuration>
+                    </execution>
+                </executions>
+          </plugin>
+          <plugin>
+              <groupId>org.apache.felix</groupId>
+              <artifactId>maven-bundle-plugin</artifactId>
+              <executions>
+                  <execution>
+                      <id>package-to-modules</id>
+                      <phase>process-test-resources</phase>
+                      <goals>
+                          <goal>manifest</goal>
+                      </goals>
+                  </execution>
+              </executions>
+              <configuration>
+                  <instructions>
+                      <Bundle-SymbolicName>${project.artifactId}</Bundle-SymbolicName>
+                      <Import-Package>*</Import-Package>
+                  </instructions>
+              </configuration>
+          </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>2.4</version>
+                <executions>
+                    <execution>
+                        <id>package-to-modules</id>
+                        <phase>process-test-resources</phase>
+                        <goals>
+                            <goal>jar</goal>
+                        </goals>
+                        <configuration>
+                          <archive>
+                            <manifestFile>${basedir}/target/generated-sources/bundle/META-INF/MANIFEST.MF</manifestFile>
+                          </archive>
+                          <outputDirectory>${basedir}/target/modules</outputDirectory>
+                          <finalName>${project.artifactId}</finalName>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <artifactId>maven-dependency-plugin</artifactId>
                 <executions>
